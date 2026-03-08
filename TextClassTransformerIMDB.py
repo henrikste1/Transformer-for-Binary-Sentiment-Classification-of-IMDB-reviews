@@ -3,10 +3,10 @@ from tensorflow import keras
 from tensorflow.keras import layers
 import numpy as np
 import pandas as pd
+import time  # Added for timing
 
 # Global variable
-max_length_value = 1024  # Fixed amount of characters to use
-
+max_length_value = 1024 # Fixed amount of characters to use
 
 def configure_gpu():
     gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -127,7 +127,7 @@ class PositionalEmbedding(layers.Layer):
 
 
 class TransformerBlock(layers.Layer):
-    def __init__(self, d_model, num_heads, dff, dropout_rate=0.1):
+    def __init__(self, d_model, num_heads, dff, dropout_rate=0.05):
         super().__init__()
 
         self.mha = layers.MultiHeadAttention(
@@ -158,12 +158,11 @@ class TransformerBlock(layers.Layer):
 
         return out2
 
-
 def build_model(vocab_size, max_length=max_length_value):
     d_model = 256
-    num_heads = 8  # Attention heads
-    dff = 512  # Increased feed-forward dimension
-    dropout_rate = 0.1
+    num_heads = 6  # Attention heads
+    dff = 128  # Feed-forward dimension
+    dropout_rate = 0.05
 
     # Input layer
     inputs = layers.Input(shape=(max_length,), dtype=tf.int32, name='input_layer')
@@ -199,8 +198,40 @@ class GPUMonitorCallback(tf.keras.callbacks.Callback):
                   f"Peak: {gpu_stats['peak'] / 1e9:.2f}GB")
 
 
+# Function to evaluate model on test data
+def evaluate_on_test_data(model, char_to_id, batch_size=32):
+    print("\nLoading test data...")
+    texts, labels = load_imdb_data()
+    
+    # Use last 25k rows as test data
+    X_test = texts[25000:]
+    y_test = labels[25000:]
+    
+    print(f"Test data size: {len(X_test)} samples")
+    
+    # Create test dataset
+    test_dataset = preprocess_dataset(X_test, y_test, char_to_id, max_length_value, batch_size)
+    
+    print("Evaluating model on test data...")
+    test_loss, test_accuracy = model.evaluate(test_dataset, verbose=1)
+    
+    return test_loss, test_accuracy
+
+
+# Format time function
+def format_time(seconds):
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    seconds = seconds % 60
+    return f"{int(hours):02d}:{int(minutes):02d}:{seconds:05.2f}"
+
+
 # Main training script
 def main():
+    # Start timing the entire process
+    total_start_time = time.time()
+    training_time = 0
+
     configure_gpu()
 
     print("Loading IMDB dataset...")
@@ -217,10 +248,10 @@ def main():
     # Use first 20k for training, next 5k for validation, exclude last 25k for test
     X_train = texts[:20000]
     y_train = labels[:20000]
-
+    
     X_val = texts[20000:25000]
     y_val = labels[20000:25000]
-
+    
     # The last 25k (25000:50000) are excluded for later test use
 
     # Create TensorFlow datasets
@@ -261,6 +292,8 @@ def main():
     ]
 
     print("Starting training...")
+    training_start_time = time.time()
+    
     history = model.fit(
         train_dataset,
         epochs=20,
@@ -268,6 +301,8 @@ def main():
         callbacks=callbacks,
         verbose=1
     )
+    
+    training_time = time.time() - training_start_time
 
     print("Evaluating model...")
     val_loss, val_acc = model.evaluate(val_dataset, verbose=0)
@@ -276,6 +311,23 @@ def main():
     # Save the final model
     model.save('gpu_char_transformer_imdb.keras')
     print("Final model saved!")
+
+    # Evaluate on test data (last 25k rows)
+    test_loss, test_accuracy = evaluate_on_test_data(model, char_to_id, batch_size)
+    
+    total_time = time.time() - total_start_time
+
+    # Print final results with timing information
+    print(f"\n{'='*60}")
+    print(f"FINAL RESULTS SUMMARY:")
+    print(f"{'='*60}")
+    print(f"Validation Accuracy: {val_acc:.4f}")
+    print(f"Test Accuracy:       {test_accuracy:.4f}")
+    print(f"Test Loss:           {test_loss:.4f}")
+    print(f"{'-'*60}")
+    print(f"Training Time:       {format_time(training_time)}")
+    print(f"Total Time:          {format_time(total_time)}")
+    print(f"{'='*60}")
 
 
 if __name__ == "__main__":
